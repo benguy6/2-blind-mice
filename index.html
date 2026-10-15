@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mouse Mail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link id="gf" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: full-bleed WebGL desk diorama; HUD card pinned top-left; touch pad pinned bottom on coarse pointers */
+:root{
+  --desk:#1b1712;
+  --panel:rgba(16,19,26,.84);
+  --paper:#f1ede4;
+  --muted:#a3a9b6;
+  --mustard:#f2b134;
+  --coral:#e8603c;
+  --p1:#ff7a59;
+  --p2:#5cc2ff;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --cond:"IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  color-scheme: dark;
+}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--desk);color:var(--paper)}
+#stage{position:fixed;inset:0}
+#stage canvas{display:block;width:100%;height:100%;touch-action:none}
+#hud{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:16px;max-width:min(360px,calc(100vw - 32px));
+  background:var(--panel);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px 14px;
+  font:500 13px/1.45 var(--cond);backdrop-filter:blur(6px);display:grid;gap:8px}
+#hud .brand{display:flex;align-items:baseline;gap:10px;font:700 15px var(--mono);letter-spacing:.06em}
+#hud .brand span{font:500 12px var(--mono);color:var(--mustard);letter-spacing:.02em}
+#obj{font:600 14px/1.4 var(--cond);color:var(--paper)}
+#obj b{font-family:var(--mono);color:var(--mustard);font-weight:600;white-space:pre}
+.ctrl{color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.tag{font:700 11px var(--mono);padding:1px 6px;border-radius:4px;color:#14161c}
+.tag.p1{background:var(--p1)} .tag.p2{background:var(--p2)}
+kbd{font:600 11px var(--mono);background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--paper)}
+#p2s{color:var(--muted)} #p2s.on{color:var(--p2)}
+.btns{display:flex;gap:6px;flex-wrap:wrap}
+.btns button{font:600 12px var(--cond);color:var(--paper);background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);
+  border-radius:6px;padding:4px 10px;cursor:pointer}
+.btns button:hover{background:rgba(255,255,255,.14)}
+.btns button:focus-visible,#touch button:focus-visible{outline:2px solid var(--mustard);outline-offset:2px}
+#touch{position:fixed;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom,0px));display:none;justify-content:space-between;padding-inline:16px;pointer-events:none}
+#touch .pad{display:grid;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(2,54px);gap:6px;pointer-events:auto}
+#touch button{pointer-events:auto;border:1px solid rgba(255,255,255,.2);background:rgba(16,19,26,.7);color:var(--paper);
+  border-radius:12px;font:700 18px var(--mono);touch-action:none;user-select:none;-webkit-user-select:none}
+#touch .jump{width:84px;height:84px;border-radius:50%;align-self:end;background:rgba(242,177,52,.85);color:#14161c;font-size:14px}
+@media (pointer:coarse){#touch{display:flex} .ctrl.kb{display:none}}
+@media (max-width:520px){#hud{font-size:12px;padding:10px 12px} #obj{font-size:13px}}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="hud">
+  <div class="brand">MOUSE MAIL <span id="lvl">Draft 1 of 4</span></div>
+  <div id="obj">Loading the desk…</div>
+  <div class="ctrl kb"><span class="tag p1">P1</span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move <kbd>Space</kbd> jump</div>
+  <div class="ctrl kb"><span class="tag p2">P2</span><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move <kbd>Enter</kbd> jump <span id="p2s">· press an arrow to join</span></div>
+  <div class="btns"><button id="bReset" type="button">Reset draft (R)</button><button id="bSkip" type="button">Skip draft</button><button id="bMute" type="button">Sound on (M)</button></div>
+</div>
+<div id="touch" aria-hidden="true">
+  <div class="pad">
+    <span></span><button data-d="up">↑</button><span></span>
+    <button data-d="left">←</button><button data-d="down">↓</button><button data-d="right">→</button>
+  </div>
+  <button class="jump" data-d="jump">JUMP</button>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+try {
+  const gf = document.getElementById('gf');
+  await new Promise(r => { if (gf.sheet) r(); else { gf.addEventListener('load', r); gf.addEventListener('error', r); setTimeout(r, 3000); } });
+  await Promise.race([
+    Promise.all([
+      document.fonts.load('700 64px "IBM Plex Mono"'),
+      document.fonts.load('600 40px "IBM Plex Mono"'),
+      document.fonts.load('500 30px "IBM Plex Mono"'),
+      document.fonts.load('600 30px "IBM Plex Sans Condensed"'),
+    ]),
+    new Promise(r => setTimeout(r, 2500)),
+  ]);
+} catch (e) {}
+
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- world constants (1 unit = 1 key unit, "1u") ---------- */
+const GAP = 0.06, CAP_H = 0.55, CAP_BOTTOM = 0.8, PLATE = 0.72, CASE_TOP = 1.15, INSET = 0.1, TRAVEL = 0.2, BEVEL = 0.06;
+const KEY_TOP = CAP_BOTTOM + CAP_H;
+const GRAV = 32, JUMP_H = 1.4, JUMP_V = Math.sqrt(2 * GRAV * JUMP_H);
+const STEP = 0.26, SNAP = 0.32, SPEED = 4.4, R = 0.22, MOUSE_H = 0.55, MOUSE_SCALE = 1.3;
+const BOUNDS = { x0: -12.5, x1: 12.5, z0: -4.4, z1: 6.2 };
+const CASE = { x0: -8.05, x1: 8.05, z0: -3.05, z1: 3.05 };
+const WELL = { x0: -7.56, x1: 7.56, z0: -2.56, z1: 2.56 };
+
+const COL = {
+  alpha: { cap: '#ece7dc', ink: '#2a2d34' },
+  mod:   { cap: '#4b5568', ink: '#e9edf3' },
+  esc:   { cap: '#e8603c', ink: '#fff6ef' },
+  enter: { cap: '#f2b134', ink: '#2a2214' },
+  space: { cap: '#ece7dc', ink: '#2a2d34' },
+};
+
+/* ---------- renderer / scene / camera ---------- */
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+stage.appendChild(renderer.domElement);
+const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#1b1712');
+scene.fog = new THREE.Fog('#1b1712', 45, 80);
+
+const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 200);
+const ELEV = THREE.MathUtils.degToRad(70);         // camera pitched 70° down from horizontal
+const camTarget = new THREE.Vector3(0, 2.2, -5.6);
+
+function fit() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+  const needH = 10.7, needW = camera.aspect < 1 ? 8.8 : 11.4;
+  const D = Math.max(needH / tv, needW / (tv * camera.aspect));
+  camera.position.set(0, camTarget.y + Math.sin(ELEV) * D, camTarget.z + Math.cos(ELEV) * D);
+  camera.lookAt(camTarget);
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', fit);
+fit();
+
+/* ---------- lights ---------- */
+scene.add(new THREE.HemisphereLight('#d5e3ff', '#3a2a1c', 0.9));
+const sun = new THREE.DirectionalLight('#ffe1b5', 2.4);
+sun.position.set(-9, 20, 9);
+sun.target.position.set(0, 0, -1);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 12, bottom: -12, near: 1, far: 50 });
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+const screenGlow = new THREE.PointLight('#a9c6ff', 40, 22, 2);
+screenGlow.position.set(0, 5, -4.5);
+scene.add(screenGlow);
+
+/* ---------- helpers ---------- */
+function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function tex(cv, repeat) {
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = MAX_ANISO;
+  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(...repeat); }
+  return t;
+}
+function rrShape(w, d, r) {
+  const s = new THREE.Shape(), x = -w / 2, y = -d / 2;
+  s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + d - r); s.quadraticCurveTo(x + w, y + d, x + w - r, y + d);
+  s.lineTo(x + r, y + d); s.quadraticCurveTo(x, y + d, x, y + d - r);
+  s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+}
+function rrPath(c, x, y, w, h, r) {
+  c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+// extruded rounded slab, bottom at y=0, height h
+function slab(w, d, h, r, bevel = 0.04) {
+  const g = new THREE.ExtrudeGeometry(rrShape(w - 2 * bevel, d - 2 * bevel, r), {
+    depth: Math.max(0.001, h - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 6,
+  });
+  g.rotateX(-Math.PI / 2); g.translate(0, bevel, 0);
+  return g;
+}
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, ...extra });
+
+/* ---------- desk + mat ---------- */
+{
+  const cv = canvas(1024, 1024), c = cv.getContext('2d');
+  c.fillStyle = '#5b3e2a'; c.fillRect(0, 0, 1024, 1024);
+  for (let i = 0; i < 260; i++) {
+    const y = Math.random() * 1024;
+    c.strokeStyle = Math.random() < 0.5 ? `rgba(28,16,8,${Math.random() * 0.14})` : `rgba(150,108,72,${Math.random() * 0.12})`;
+    c.lineWidth = 1 + Math.random() * 4;
+    c.beginPath(); c.moveTo(0, y);
+    for (let x = 0; x <= 1024; x += 32) c.lineTo(x, y + Math.sin(x * 0.01 + i) * 5 + Math.sin(x * 0.003 + i * 2) * 14);
+    c.stroke();
+  }
+  c.fillStyle = 'rgba(0,0,0,.4)';
+  for (let p = 0; p < 4; p++) c.fillRect(0, p * 256, 1024, 3);
+  const desk = new THREE.Mesh(new THREE.PlaneGeometry(90, 70), std('#ffffff', { map: tex(cv, [4, 3]), roughness: 0.75 }));
+  desk.rotation.x = -Math.PI / 2; desk.receiveShadow = true; scene.add(desk);
+
+  const mv = canvas(1280, 560), m = mv.getContext('2d');
+  m.fillStyle = '#23372f'; m.fillRect(0, 0, 1280, 560);
+  for (let i = 0; i < 9000; i++) { m.fillStyle = `rgba(255,255,255,${Math.random() * 0.035})`; m.fillRect(Math.random() * 1280, Math.random() * 560, 2, 2); }
+  m.setLineDash([14, 10]); m.lineWidth = 4; m.strokeStyle = 'rgba(236,231,220,.28)';
+  rrPath(m, 18, 18, 1244, 524, 40); m.stroke();
+  const mat = new THREE.Mesh(new THREE.ShapeGeometry(rrShape(28, 12.2, 0.9)), std('#ffffff', { map: tex(mv), roughness: 0.95 }));
+  // remap ShapeGeometry UVs (which are in world units) to 0..1
+  const uv = mat.geometry.attributes.uv, pos = mat.geometry.attributes.position;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + 14) / 28, (pos.getY(i) + 6.1) / 12.2);
+  mat.rotation.x = -Math.PI / 2; mat.position.set(0, 0.012, 0.6); mat.receiveShadow = true; scene.add(mat);
+}
+
+/* ---------- keyboard case ---------- */
+{
+  const caseMat = std('#1f2a3a', { roughness: 0.45, metalness: 0.15 });
+  const base = new THREE.Mesh(slab(CASE.x1 - CASE.x0, CASE.z1 - CASE.z0, PLATE, 0.45), caseMat);
+  base.castShadow = base.receiveShadow = true; scene.add(base);
+
+  const outer = rrShape(CASE.x1 - CASE.x0 - 0.08, CASE.z1 - CASE.z0 - 0.08, 0.42);
+  const hole = rrShape(WELL.x1 - WELL.x0 + 0.08, WELL.z1 - WELL.z0 + 0.08, 0.12);
+  outer.holes.push(hole);
+  const rimGeo = new THREE.ExtrudeGeometry(outer, { depth: CASE_TOP - PLATE - 0.08, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.04, bevelSegments: 3, curveSegments: 8 });
+  rimGeo.rotateX(-Math.PI / 2); rimGeo.translate(0, PLATE + 0.04, 0);
+  const rim = new THREE.Mesh(rimGeo, caseMat); rim.castShadow = rim.receiveShadow = true; scene.add(rim);
+
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(WELL.x1 - WELL.x0, 0.02, WELL.z1 - WELL.z0), std('#121519', { roughness: 0.4, metalness: 0.4 }));
+  plate.position.y = PLATE; plate.receiveShadow = true; scene.add(plate);
+
+  // badge on the front rim
+  const bv = canvas(640, 80), b = bv.getContext('2d');
+  b.fillStyle = '#f2b134'; b.font = '700 44px "IBM Plex Mono"'; b.textBaseline = 'middle';
+  b.fillText('MOUSETRAP·60', 8, 42);
+  const badge = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.325), new THREE.MeshBasicMaterial({ map: tex(bv), transparent: true }));
+  badge.rotation.x = -Math.PI / 2; badge.position.set(5.9, CASE_TOP + 0.005, 2.81); scene.add(badge);
+
+  // USB cable running back to the monitor
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-5.5, 0.55, -3.0), new THREE.Vector3(-5.6, 0.14, -3.7),
+    new THREE.Vector3(-4.2, 0.12, -5.0), new THREE.Vector3(-1.2, 0.12, -6.4), new THREE.Vector3(0, 0.12, -8.5),
+  ]);
+  const cable = new THREE.Mesh(new THREE.TubeGeometry(curve, 60, 0.11, 10), std('#1a1d22', { roughness: 0.5 }));
+  cable.castShadow = true; scene.add(cable);
+}
+
+/* ---------- keys ---------- */
+const sym = (ch, sh, w = 1) => ({ id: ch, ch, sh, w, kind: 'alpha' });
+const ltr = s => [...s].map(c => ({ id: c, ch: c, sh: c.toUpperCase(), w: 1, kind: 'alpha' }));
+const mod = (id, label, w, kind = 'mod') => ({ id, label, w, kind });
+const ROWS = [
+  [mod('Esc', 'Esc', 1, 'esc'), ...['1!', '2@', '3#', '4$', '5%', '6^', '7&', '8*', '9(', '0)', '-_', '=+'].map(p => sym(p[0], p[1])), mod('Backspace', 'Backspace', 2)],
+  [mod('Tab', 'Tab', 1.5), ...ltr('qwertyuiop'), sym('[', '{'), sym(']', '}'), sym('\\', '|', 1.5)],
+  [mod('Caps', 'Caps Lock', 1.75), ...ltr('asdfghjkl'), sym(';', ':'), sym("'", '"'), mod('Enter', 'Enter', 2.25, 'enter')],
+  [mod('ShiftL', 'Shift', 2.25), ...ltr('zxcvbnm'), sym(',', '<'), sym('.', '>'), sym('/', '?'), mod('ShiftR', 'Shift', 2.75)],
+  [mod('Ctrl', 'Ctrl', 1.25), mod('Win', 'Win', 1.25), mod('Alt', 'Alt', 1.25), mod('Space', '', 6.25, 'space'), mod('AltR', 'Alt', 1.25), mod('Fn', 'Fn', 1.25), mod('Menu', 'Menu', 1.25), mod('CtrlR', 'Ctrl', 1.25)],
+];
+
+const capGeoCache = new Map();
+function capGeo(w) {
+  if (capGeoCache.has(w)) return capGeoCache.get(w);
+  const fw = w - GAP, fd = 1 - GAP;
+  const g = new THREE.ExtrudeGeometry(rrShape(fw - 2 * BEVEL, fd - 2 * BEVEL, 0.07), {
+    depth: CAP_H - 2 * BEVEL, bevelEnabled: true, bevelThickness: BEVEL, bevelSize: BEVEL, bevelSegments: 3, curveSegments: 4,
+  });
+  g.rotateX(-Math.PI / 2); g.translate(0, BEVEL, 0);
+  // taper toward the top like a real keycap
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const t = clamp(p.getY(i) / CAP_H, 0, 1);
+    p.setX(i, p.getX(i) * (fw / 2 - INSET * t) / (fw / 2));
+    p.setZ(i, p.getZ(i) * (fd / 2 - INSET * t) / (fd / 2));
+  }
+  capGeoCache.set(w, g);
+  return g;
+}
+function topFace(w) { // flat legend area on the cap top
+  const fw = w - GAP, fd = 1 - GAP;
+  return [2 * (fw / 2 - BEVEL) * (fw / 2 - INSET) / (fw / 2) - 0.03, 2 * (fd / 2 - BEVEL) * (fd / 2 - INSET) / (fd / 2) - 0.03];
+}
+function legendTex(d, style, lw, ld) {
+  if (d.kind === 'space') return null;
+  const H = 128, W = Math.round(H * lw / ld), cv = canvas(W, H), c = cv.getContext('2d');
+  c.fillStyle = style.ink; c.textBaseline = 'middle';
+  if (d.kind === 'alpha' && /[a-z]/.test(d.ch)) {
+    c.font = '600 80px "IBM Plex Mono"'; c.textAlign = 'center'; c.fillText(d.ch.toUpperCase(), W / 2, H / 2 + 4);
+  } else if (d.kind === 'alpha') {
+    c.textAlign = 'center';
+    c.font = '600 48px "IBM Plex Mono"'; c.fillText(d.sh, W / 2, 36);
+    c.font = '600 52px "IBM Plex Mono"'; c.fillText(d.ch, W / 2, 92);
+  } else {
+    c.font = '600 34px "IBM Plex Sans Condensed"';
+    if (d.w >= 1.5) { c.textAlign = 'left'; c.fillText(d.label, 16, H / 2 + 22); }
+    else { c.textAlign = 'center'; c.fillText(d.label, W / 2, H / 2 + 2); }
+    if (d.id === 'Enter') { c.font = '600 44px "IBM Plex Mono"'; c.textAlign = 'right'; c.fillText('↵', W - 16, 38); }
+    if (d.id === 'Backspace') { c.font = '600 44px "IBM Plex Mono"'; c.textAlign = 'right'; c.fillText('←', W - 16, 38); }
+  }
+  return tex(cv);
+}
+
+const keys = [], keyById = {};
+const housingGeo = new THREE.BoxGeometry(0.62, 0.14, 0.62), housingMat = std('#2b2f36', { roughness: 0.5 });
+const stemGeo = new THREE.BoxGeometry(0.26, 1, 0.26), stemMat = std('#d8453b', { roughness: 0.35 });
+ROWS.forEach((row, ri) => {
+  let cx = -7.5;
+  for (const d of row) {
+    const x = cx + d.w / 2, z = -2 + ri; cx += d.w;
+    const style = COL[d.kind];
+    const mat = std(style.cap, { roughness: 0.55, emissive: '#000000' });
+    const group = new THREE.Group(); group.position.set(x, CAP_BOTTOM, z);
+    const cap = new THREE.Mesh(capGeo(d.w), mat); cap.castShadow = cap.receiveShadow = true; group.add(cap);
+    const [lw, ld] = topFace(d.w);
+    const lt = legendTex(d, style, lw, ld);
+    if (lt) {
+      const lg = new THREE.Mesh(new THREE.PlaneGeometry(lw, ld), new THREE.MeshStandardMaterial({ map: lt, transparent: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }));
+      lg.rotation.x = -Math.PI / 2; lg.position.y = CAP_H + 0.002; lg.receiveShadow = true; group.add(lg);
+    }
+    scene.add(group);
+    const housing = new THREE.Mesh(housingGeo, housingMat); housing.position.set(x, PLATE + 0.07, z); scene.add(housing);
+    const stem = new THREE.Mesh(stemGeo, stemMat); stem.position.set(x, PLATE, z); stem.castShadow = true; scene.add(stem);
+    const k = {
+      def: d, x, z, hx: (d.w - GAP) / 2, hz: (1 - GAP) / 2, group, mat, stem,
+      raise: 0, raiseT: 0, depth: 0, down: 0, held: false,
+      top() { return CAP_BOTTOM + this.raise - this.depth + CAP_H; },
+    };
+    keys.push(k); keyById[d.id] = k;
+  }
+});
+// Caps Lock LED on its keycap
+const capsLed = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.06), new THREE.MeshStandardMaterial({ color: '#2a3a2e', emissive: '#000000' }));
+{
+  const [lw, ld] = topFace(1.75);
+  capsLed.position.set(lw / 2 - 0.14, CAP_H + 0.01, -ld / 2 + 0.12);
+  keyById.Caps.group.add(capsLed);
+}
+
+/* ---------- monitor ---------- */
+const SCR_W = 18, SCR_H = 10.125, BZ = 0.45, CHIN = 0.7;
+const screenCv = canvas(1280, 720), sctx = screenCv.getContext('2d');
+const screenTex = tex(screenCv);
+{
+  const mon = new THREE.Group();
+  mon.position.set(0, 1.5, -5.0);
+  mon.rotation.x = -THREE.MathUtils.degToRad(66);   // tilted back so the screen faces the 70° camera
+  const bw = SCR_W + 2 * BZ, bh = SCR_H + BZ + CHIN;
+  const bezelGeo = new THREE.ExtrudeGeometry(rrShape(bw, bh, 0.5), { depth: 0.5, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 3 });
+  const bezel = new THREE.Mesh(bezelGeo, std('#15171c', { roughness: 0.35, metalness: 0.2 }));
+  bezel.position.set(0, bh / 2, -0.5); bezel.castShadow = true; mon.add(bezel);
+  const back = new THREE.Mesh(slab(bw * 0.55, bh * 0.5, 1.2, 0.6), std('#1d2027', { roughness: 0.4 }));
+  back.rotation.x = -Math.PI / 2; back.position.set(0, bh / 2, -0.55); mon.add(back);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(SCR_W, SCR_H), new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false }));
+  screen.position.set(0, CHIN + SCR_H / 2, 0.09); mon.add(screen);
+  // chin logo
+  const lv = canvas(256, 64), l = lv.getContext('2d');
+  l.fillStyle = '#6b7280'; l.font = '600 34px "IBM Plex Sans Condensed"'; l.textAlign = 'center'; l.textBaseline = 'middle'; l.fillText('CHEDDAR', 128, 34);
+  const logo = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.35), new THREE.MeshBasicMaterial({ map: tex(lv), transparent: true }));
+  logo.position.set(0, CHIN / 2, 0.09); mon.add(logo);
+  scene.add(mon);
+  mon.updateMatrixWorld(true);
+  // stand: neck from desk foot to the back of the monitor
+  const top = mon.localToWorld(new THREE.Vector3(0, bh * 0.5, -1.5));
+  const foot = new THREE.Vector3(0, 0.25, top.z + 1.5);
+  const dir = top.clone().sub(foot), len = dir.length();
+  const neck = new THREE.Mesh(new THREE.BoxGeometry(1.6, len, 0.6), std('#2a2e36', { roughness: 0.35, metalness: 0.5 }));
+  neck.position.copy(foot).addScaledVector(dir, 0.5);
+  neck.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  neck.castShadow = true; scene.add(neck);
+  const baseM = new THREE.Mesh(slab(6, 3.6, 0.25, 1.2), std('#2a2e36', { roughness: 0.35, metalness: 0.5 }));
+  baseM.position.set(0, 0, foot.z); baseM.castShadow = baseM.receiveShadow = true; scene.add(baseM);
+}
+
+/* ---------- desk clutter ---------- */
+{
+  const mug = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.2, 2.8, 32, 1, true), std('#e8603c', { roughness: 0.4, side: THREE.DoubleSide }));
+  body.position.y = 1.4; body.castShadow = true;
+  const bottom = new THREE.Mesh(new THREE.CircleGeometry(1.2, 32), std('#e8603c')); bottom.rotation.x = -Math.PI / 2; bottom.position.y = 0.02;
+  const coffee = new THREE.Mesh(new THREE.CircleGeometry(1.22, 32), std('#2b1a10', { roughness: 0.15 })); coffee.rotation.x = -Math.PI / 2; coffee.position.y = 2.45;
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.16, 12, 24, Math.PI), std('#e8603c', { roughness: 0.4 }));
+  handle.rotation.z = -Math.PI / 2; handle.position.set(1.3, 1.4, 0); handle.castShadow = true;
+  mug.add(body, bottom, coffee, handle); mug.position.set(-11.6, 0, -1.2); scene.add(mug);
+
+  const nv = canvas(512, 512), n = nv.getContext('2d');
+  n.fillStyle = '#f7de6c'; n.fillRect(0, 0, 512, 512);
+  n.fillStyle = 'rgba(0,0,0,.06)'; n.fillRect(0, 0, 512, 60);
+  n.fillStyle = '#3a3320'; n.font = '600 54px "IBM Plex Sans Condensed"';
+  ['TODO', '- buy cheese', '- email mom', '- quit job?'].forEach((t, i) => n.fillText(t, 36, 140 + i * 88));
+  const note = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4), std('#ffffff', { map: tex(nv), roughness: 0.9 }));
+  note.rotation.x = -Math.PI / 2; note.rotation.z = 0.12; note.position.set(11.2, 0.02, 0.6); note.receiveShadow = true; scene.add(note);
+}
+
+/* ---------- level props (parkour platforms) ---------- */
+const props = [];   // { x0,x1,z0,z1, top, group, drop }
+function rulerTex() {
+  const cv = canvas(1024, 128), c = cv.getContext('2d');
+  c.fillStyle = '#e9c46a'; c.fillRect(0, 0, 1024, 128);
+  c.strokeStyle = '#3b2f17'; c.fillStyle = '#3b2f17'; c.font = '600 22px "IBM Plex Mono"';
+  for (let i = 0; i <= 100; i++) {
+    const x = 12 + i * 10, h = i % 10 === 0 ? 40 : i % 5 === 0 ? 28 : 16;
+    c.lineWidth = 2; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke();
+    if (i % 10 === 0) c.fillText(String(i / 10), x - 6, 66);
+  }
+  c.fillText('cm', 960, 108);
+  return tex(cv);
+}
+function addRuler(x0, x1, z, top) {
+  const g = new THREE.Group();
+  const len = x1 - x0;
+  const ruler = new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, 0.8), [
+    std('#d9b45a'), std('#d9b45a'), std('#ffffff', { map: rulerTex(), roughness: 0.5 }), std('#d9b45a'), std('#d9b45a'), std('#d9b45a'),
+  ]);
+  ruler.position.set((x0 + x1) / 2, top - 0.06, z); ruler.castShadow = ruler.receiveShadow = true; g.add(ruler);
+  for (const ex of [x0 + 0.5, x1 - 0.5]) {
+    const h = top - 0.12 - KEY_TOP;
+    const pinkE = new THREE.Mesh(new THREE.BoxGeometry(0.75, h, 0.6), std('#f29bb0', { roughness: 0.85 }));
+    pinkE.position.set(ex, KEY_TOP + h / 2, z); pinkE.castShadow = true;
+    const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.8, h * 0.55, 0.65), std('#3a6ea5', { roughness: 0.6 }));
+    sleeve.position.set(ex, KEY_TOP + h * 0.72, z); sleeve.castShadow = true;
+    g.add(pinkE, sleeve);
+  }
+  scene.add(g);
+  props.push({ x0, x1, z0: z - 0.4, z1: z + 0.4, top, group: g, drop: reduceMotion ? 0 : 6 });
+}
+function clearProps() {
+  for (const p of props) { scene.remove(p.group); p.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+  props.length = 0;
+}
+
+/* ---------- collision: highest surface under a circle ---------- */
+function overlap(x, z, r, x0, x1, z0, z1) {
+  const cx = clamp(x, x0, x1), cz = clamp(z, z0, z1);
+  return (x - cx) ** 2 + (z - cz) ** 2 <= r * r + 1e-9;
+}
+function groundAt(x, z, r, self) {
+  let h = 0, key = null, mouse = null;
+  if (overlap(x, z, r, CASE.x0, CASE.x1, CASE.z0, CASE.z1)) {
+    const inWell = x - r > WELL.x0 && x + r < WELL.x1 && z - r > WELL.z0 && z + r < WELL.z1;
+    h = inWell ? PLATE : CASE_TOP;
+  }
+  let kd = Infinity;
+  for (const k of keys) {
+    if (!overlap(x, z, r, k.x - k.hx, k.x + k.hx, k.z - k.hz, k.z + k.hz)) continue;
+    const t = k.top(), d = (x - k.x) ** 2 / (k.hx * k.hx) + (z - k.z) ** 2;
+    if (t > h + 1e-4 || (key && Math.abs(t - h) <= 1e-4 && d < kd)) { h = t; key = k; kd = d; }
+  }
+  for (const p of props) {
+    if (overlap(x, z, r, p.x0, p.x1, p.z0, p.z1) && p.top > h) { h = p.top; key = null; }
+  }
+  for (const m of players) {
+    if (m === self || !m.active) continue;
+    if ((x - m.x) ** 2 + (z - m.z) ** 2 < (r + 0.16) ** 2 && m.y + MOUSE_H > h) { h = m.y + MOUSE_H; key = null; mouse = m; }
+  }
+  return { h, key, mouse };
+}
+
+/* ---------- mice ---------- */
+const blobTex = (() => {
+  const cv = canvas(128, 128), c = cv.getContext('2d');
+  const g = c.createRadialGradient(64, 64, 4, 64, 64, 62);
+  g.addColorStop(0, 'rgba(0,0,0,.55)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = g; c.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(cv);
+})();
+
+function buildMouse(furColor, scarfColor) {
+  const group = new THREE.Group(), body = new THREE.Group();
+  group.add(body);
+  const fur = std(furColor, { roughness: 0.95 });
+  const pink = std('#f2a3ae', { roughness: 0.6 });
+  const black = std('#0e0e10', { roughness: 0.2 });
+  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; body.add(m); return m; };
+  const torso = add(new THREE.SphereGeometry(1, 24, 18), fur, 0, 0.2, -0.02); torso.scale.set(0.2, 0.18, 0.27);
+  add(new THREE.SphereGeometry(0.15, 20, 16), fur, 0, 0.3, 0.24);
+  const snout = add(new THREE.ConeGeometry(0.095, 0.2, 18), fur, 0, 0.27, 0.4); snout.rotation.x = Math.PI / 2;
+  add(new THREE.SphereGeometry(0.032, 12, 10), pink, 0, 0.27, 0.5);
+  add(new THREE.SphereGeometry(0.028, 12, 10), black, 0.07, 0.34, 0.35);
+  add(new THREE.SphereGeometry(0.028, 12, 10), black, -0.07, 0.34, 0.35);
+  for (const s of [-1, 1]) {
+    const ear = add(new THREE.CylinderGeometry(0.11, 0.11, 0.02, 24), fur, s * 0.12, 0.45, 0.2);
+    ear.rotation.set(Math.PI / 2 - 0.25, 0, s * -0.35);
+    const inner = add(new THREE.CylinderGeometry(0.075, 0.075, 0.022, 24), pink, s * 0.12, 0.45, 0.212);
+    inner.rotation.copy(ear.rotation);
+  }
+  const scarf = add(new THREE.TorusGeometry(0.135, 0.035, 10, 24), std(scarfColor, { roughness: 0.8 }), 0, 0.25, 0.14);
+  scarf.rotation.x = Math.PI / 2 - 0.5;
+  const whiskMat = new THREE.LineBasicMaterial({ color: '#2a2a2a' });
+  for (const s of [-1, 1]) {
+    const pts = [];
+    for (const dy of [-0.02, 0.02]) { pts.push(new THREE.Vector3(s * 0.05, 0.27, 0.44), new THREE.Vector3(s * 0.2, 0.27 + dy * 2, 0.42)); }
+    body.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), whiskMat));
+  }
+  const tailCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0.14, -0.26), new THREE.Vector3(0, 0.1, -0.42), new THREE.Vector3(0.08, 0.16, -0.58), new THREE.Vector3(0.02, 0.28, -0.7),
+  ]);
+  const tail = new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 24, 0.018, 6), pink);
+  tail.castShadow = true;
+  const tailPivot = new THREE.Group(); tailPivot.position.set(0, 0, -0.2); tail.position.z = 0.2; tailPivot.add(tail); body.add(tailPivot);
+  const feet = [];
+  for (const [fx, fz] of [[0.1, 0.12], [-0.1, 0.12], [0.11, -0.13], [-0.11, -0.13]]) {
+    const f = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), pink);
+    f.scale.set(1, 0.55, 1.4); f.position.set(fx, 0.025, fz); group.add(f); feet.push(f);
+  }
+  return { group, body, feet, tail: tailPivot };
+}
+
+const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+function makePlayer(id, fur, scarf, color, spawn) {
+  const m = buildMouse(fur, scarf);
+  m.group.scale.setScalar(MOUSE_SCALE);
+  scene.add(m.group);
+  const blob = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), blobMat.clone());
+  blob.rotation.x = -Math.PI / 2; scene.add(blob);
+  return {
+    id, ...m, blob, color: new THREE.Color(color), spawn,
+    x: spawn.x, y: 0, z: spawn.z, vx: 0, vy: 0, vz: 0, dx: 0, dz: 0,
+    grounded: true, coyote: 0, airTime: 0, jumpBuf: 0, jumpCut: false, face: Math.PI,
+    groundKey: null, groundMouse: null, active: id === 1, squash: 1, squashV: 0, phase: 0,
+  };
+}
+const players = [
+  makePlayer(1, '#8f7d6c', '#ff7a59', '#ff7a59', { x: -2.2, z: 2 }),
+  makePlayer(2, '#ebe7e0', '#5cc2ff', '#5cc2ff', { x: 2.2, z: 2 }),
+];
+function placeAtSpawn(m) {
+  m.x = m.spawn.x; m.z = m.spawn.z; m.vx = m.vy = m.vz = 0;
+  m.y = groundAt(m.x, m.z, R, m).h; m.grounded = true; m.face = Math.PI;
+}
+
+/* ---------- input ---------- */
+const held = new Set();
+const touch = { up: false, down: false, left: false, right: false, jump: false };
+const GAME_CODES = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'NumpadEnter', 'KeyW', 'KeyA', 'KeyS', 'KeyD']);
+const P2_JUMP = ['Enter', 'NumpadEnter', 'ShiftRight', 'Numpad0'];
+addEventListener('keydown', e => {
+  audio();
+  if (GAME_CODES.has(e.code)) e.preventDefault();
+  if (e.repeat) return;
+  held.add(e.code);
+  if (e.code === 'Space') players[0].jumpBuf = 0.13;
+  if (e.code.startsWith('Arrow')) joinP2();
+  if (P2_JUMP.includes(e.code) && players[1].active) players[1].jumpBuf = 0.13;
+  if (e.code === 'KeyR') loadLevel(S.level);
+  if (e.code === 'KeyM') toggleMute();
+});
+addEventListener('keyup', e => held.delete(e.code));
+addEventListener('blur', () => held.clear());
+function input(m) {
+  let x, z, jumpHeld;
+  if (m.id === 1) {
+    x = (held.has('KeyD') || touch.right) - (held.has('KeyA') || touch.left);
+    z = (held.has('KeyS') || touch.down) - (held.has('KeyW') || touch.up);
+    jumpHeld = held.has('Space') || touch.jump;
+  } else {
+    x = held.has('ArrowRight') - held.has('ArrowLeft');
+    z = held.has('ArrowDown') - held.has('ArrowUp');
+    jumpHeld = P2_JUMP.some(c => held.has(c));
+  }
+  const l = Math.hypot(x, z) || 1;
+  return { x: x / l, z: z / l, jumpHeld };
+}
+document.querySelectorAll('#touch button').forEach(b => {
+  const d = b.dataset.d;
+  const on = e => { e.preventDefault(); audio(); touch[d] = true; if (d === 'jump') players[0].jumpBuf = 0.13; };
+  const off = () => { touch[d] = false; };
+  b.addEventListener('pointerdown', on);
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => b.addEventListener(ev, off));
+});
+function joinP2() {
+  const p = players[1];
+  if (p.active) return;
+  p.active = true; placeAtSpawn(p);
+  const s = document.getElementById('p2s'); s.textContent = '· joined'; s.classList.add('on');
+  sfxSqueak();
+}
+
+/* ---------- audio (synthesized switch clicks) ---------- */
+let actx = null, nbuf = null, muted = false;
+function audio() {
+  if (!actx) {
+    try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      const len = actx.sampleRate * 0.4; nbuf = actx.createBuffer(1, len, actx.sampleRate);
+      const d = nbuf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    } catch (e) { actx = null; }
+  }
+  if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
+  return actx && !muted && actx.state === 'running' ? actx : null;
+}
+function env(ac, node, t, attack, peak, decay) {
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+  node.connect(g); g.connect(ac.destination);
+}
+function noise(ac, t, type, freq, q, peak, decay, dur = 0.1) {
+  const n = ac.createBufferSource(); n.buffer = nbuf;
+  const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+  n.connect(f); env(ac, f, t, 0.002, peak, decay); n.start(t); n.stop(t + dur); return f;
+}
+function tone(ac, t, type, f0, f1, peak, decay) {
+  const o = ac.createOscillator(); o.type = type;
+  o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + decay);
+  env(ac, o, t, 0.003, peak, decay); o.start(t); o.stop(t + decay + 0.05);
+}
+function sfxClick(big = false, soft = false) {
+  const ac = audio(); if (!ac) return; const t = ac.currentTime, v = soft ? 0.35 : 1;
+  noise(ac, t, 'bandpass', big ? 1600 : 3000 + Math.random() * 800, 1.4, 0.4 * v, 0.03);
+  noise(ac, t + 0.018, 'bandpass', big ? 900 : 2200, 1.2, 0.25 * v, 0.03);
+  tone(ac, t, 'triangle', big ? 150 : 240, big ? 70 : 120, 0.35 * v, big ? 0.14 : 0.07);
+}
+function sfxSqueak() { const ac = audio(); if (!ac) return; tone(ac, ac.currentTime, 'sine', 1100, 1750, 0.05, 0.07); }
+function sfxThud() { const ac = audio(); if (!ac) return; tone(ac, ac.currentTime, 'sine', 110, 55, 0.12, 0.08); }
+function sfxError() { const ac = audio(); if (!ac) return; const t = ac.currentTime; tone(ac, t, 'square', 150, 140, 0.05, 0.09); tone(ac, t + 0.12, 'square', 120, 110, 0.05, 0.12); }
+function sfxWhoosh() {
+  const ac = audio(); if (!ac) return; const t = ac.currentTime;
+  const f = noise(ac, t, 'bandpass', 400, 0.8, 0.3, 0.55, 0.7); f.frequency.exponentialRampToValueAtTime(3200, t + 0.5);
+  tone(ac, t + 0.25, 'sine', 880, 880, 0.08, 0.25); tone(ac, t + 0.4, 'sine', 1320, 1320, 0.08, 0.35);
+}
+function toggleMute() {
+  muted = !muted;
+  document.getElementById('bMute').textContent = muted ? 'Sound off (M)' : 'Sound on (M)';
+}
+
+/* ---------- game state ---------- */
+const LEVELS = [
+  { to: 'mom@burrow.net', subject: 'first words', text: 'hi',
+    tip: 'Jump onto H, then I. Then jump on Enter to send.' },
+  { to: 'roommate@burrow.net', subject: 'groceries', text: 'need cheese',
+    tip: 'Spacebar types a space. Typo? Backspace is top right, Esc clears it all.' },
+  { to: 'team@bigcheese.co', subject: 'where i am', text: 'top', raised: { t: 1, o: 2, p: 3 }, ruler: true,
+    tip: 'Raised keys. Climb T, cross the ruler, go up. Falling onto a key types it too.' },
+  { to: 'boss@bigcheese.co', subject: 'resignation', text: 'Boss, I QUIT.',
+    tip: 'Capitals: one mouse sits on Shift while the other jumps. Solo? Caps Lock.' },
+];
+const S = { level: 0, typed: '', caps: false, flash: '', flashT: 0, sentT: -1, done: false, shake: 0 };
+const target = () => LEVELS[S.level].text;
+const shiftHeld = () => keyById.ShiftL.held || keyById.ShiftR.held;
+
+function loadLevel(i) {
+  S.level = i; S.typed = ''; S.sentT = -1; S.done = false; S.flash = ''; S.caps = false;
+  const lv = LEVELS[i];
+  for (const k of keys) { k.raiseT = (lv.raised && lv.raised[k.def.id]) || 0; k.held = false; }
+  clearProps();
+  if (lv.ruler) {
+    const g = keyById.g, l = keyById.l;
+    addRuler(g.x - 0.5, l.x + 0.5, g.z, KEY_TOP + 1.0);
+  }
+  for (const p of players) if (p.active) placeAtSpawn(p);
+  updateHud();
+}
+function updateHud() {
+  document.getElementById('lvl').textContent = S.done ? 'Outbox empty' : `Draft ${S.level + 1} of ${LEVELS.length}`;
+  const obj = document.getElementById('obj');
+  if (S.done) { obj.innerHTML = 'Every email sent. Jump on <kbd>Enter</kbd> to play again.'; return; }
+  obj.innerHTML = `Type <b>${escapeHtml(target())}</b> then jump on <kbd>Enter</kbd> to send.`;
+}
+function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function flash(msg) { S.flash = msg; S.flashT = 2.2; }
+
+const charMap = {};
+for (const k of keys) {
+  const d = k.def;
+  if (d.kind !== 'alpha') continue;
+  charMap[d.ch] = { k, shift: false };
+  if (d.sh !== d.ch) charMap[d.sh] = { k, shift: true };
+}
+charMap[' '] = { k: keyById.Space, shift: false };
+
+function pressKey(k) {
+  k.down = 0.09;
+  const id = k.def.id;
+  sfxClick(id === 'Space' || id === 'Enter' || id === 'Backspace');
+  if (id === 'ShiftL' || id === 'ShiftR') { k.held = true; return; }
+  if (S.sentT >= 0) return;
+  if (S.done) { if (id === 'Enter') { loadLevel(0); } return; }
+  switch (id) {
+    case 'Backspace':
+      if (S.typed) { S.typed = S.typed.slice(0, -1); pop(k, '⌫'); } else flash('Nothing to delete');
+      break;
+    case 'Esc':
+      if (S.typed) { S.typed = ''; pop(k, 'clr'); flash('Draft cleared'); }
+      break;
+    case 'Enter': trySend(); break;
+    case 'Space': add(' ', k); break;
+    case 'Caps': S.caps = !S.caps; break;
+    default:
+      if (k.def.kind === 'alpha') {
+        const d = k.def, sh = shiftHeld();
+        const c = /[a-z]/.test(d.ch) ? ((sh !== S.caps) ? d.sh : d.ch) : (sh ? d.sh : d.ch);
+        add(c, k);
+      }
+  }
+}
+function add(c, k) {
+  if (S.typed.length >= 28) { flash('That draft is long enough'); return; }
+  S.typed += c;
+  pop(k, c === ' ' ? '␣' : c);
+}
+function trySend() {
+  if (S.typed === target()) { S.sentT = 0; sfxWhoosh(); }
+  else {
+    S.shake = 0.35; sfxError();
+    let i = 0; while (i < S.typed.length && S.typed[i] === target()[i]) i++;
+    flash(i < S.typed.length ? 'Fix the red letters first' : 'Not finished yet');
+  }
+}
+function hintKeys() {
+  if (S.sentT >= 0) return [];
+  if (S.done) return [keyById.Enter];
+  const t = S.typed, tg = target();
+  let i = 0; while (i < t.length && t[i] === tg[i]) i++;
+  if (i < t.length) return [keyById.Backspace];
+  if (t.length === tg.length) return [keyById.Enter];
+  const c = tg[t.length], m = charMap[c];
+  if (!m) return [];
+  const sh = shiftHeld();
+  if (/[a-zA-Z]/.test(c)) {
+    const wantUp = c !== c.toLowerCase(), up = sh !== S.caps;
+    if (wantUp === up) return [m.k];
+    if (wantUp) return [keyById.Caps, keyById.ShiftL, keyById.ShiftR];
+    return S.caps ? [keyById.Caps] : [keyById.ShiftL, keyById.ShiftR];
+  }
+  if (m.shift !== sh) return [keyById.ShiftL, keyById.ShiftR];
+  return [m.k];
+}
+
+/* ---------- floating letter pops ---------- */
+const pops = [], popTexCache = new Map();
+function popTex(ch) {
+  if (popTexCache.has(ch)) return popTexCache.get(ch);
+  const cv = canvas(160, 128), c = cv.getContext('2d');
+  c.font = `700 ${ch.length > 1 ? 52 : 92}px "IBM Plex Mono"`; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.lineWidth = 12; c.strokeStyle = '#14161c'; c.strokeText(ch, 80, 68);
+  c.fillStyle = '#f2b134'; c.fillText(ch, 80, 68);
+  const t = tex(cv); popTexCache.set(ch, t); return t;
+}
+function pop(k, ch) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: popTex(ch), transparent: true, depthWrite: false, depthTest: false }));
+  sp.position.set(k.x, k.top() + 0.6, k.z); sp.scale.set(1.25, 1, 1); sp.renderOrder = 10;
+  scene.add(sp); pops.push({ sp, t: 0 });
+}
+
+/* ---------- monitor screen (email client) ---------- */
+let screenTimer = 0;
+function drawScreen(time) {
+  const c = sctx, W = 1280, H = 720, lv = LEVELS[S.level];
+  const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#22344a'); g.addColorStop(1, '#162232');
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+  c.fillStyle = 'rgba(255,255,255,.05)'; c.font = '700 260px "IBM Plex Mono"'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('✉', W / 2, H / 2 + 30);
+
+  if (S.done) {
+    c.fillStyle = '#f1ede4'; c.font = '700 84px "IBM Plex Mono"'; c.fillText('Outbox empty.', W / 2, 270);
+    c.font = '500 40px "IBM Plex Sans Condensed"'; c.fillStyle = '#a9b8cc';
+    c.fillText('4 emails sent. You quit your job. Congratulations.', W / 2, 370);
+    c.fillStyle = (time * 2 | 0) % 2 ? '#f2b134' : '#c98f1f'; c.font = '600 40px "IBM Plex Mono"';
+    c.fillText('Jump on Enter to start over', W / 2, 480);
+    screenTex.needsUpdate = true; return;
+  }
+
+  let oy = 0;
+  if (S.sentT >= 0 && !reduceMotion) { const e = clamp((S.sentT - 0.15) / 0.6, 0, 1); oy = -e * e * 800; }
+  const sx = S.shake > 0 ? Math.sin(time * 90) * 14 * S.shake / 0.35 : 0;
+  c.save(); c.translate(sx, oy);
+  rrPath(c, 48, 36, 1184, 648, 22); c.fillStyle = '#f6f3ec'; c.fill();
+  c.save(); rrPath(c, 48, 36, 1184, 648, 22); c.clip(); c.fillStyle = '#e4dfd3'; c.fillRect(48, 36, 1184, 66); c.restore();
+  ['#e8603c', '#f2b134', '#5bbf6a'].forEach((col, i) => { c.beginPath(); c.arc(88 + i * 32, 69, 10, 0, Math.PI * 2); c.fillStyle = col; c.fill(); });
+  c.fillStyle = '#5a5649'; c.font = '600 28px "IBM Plex Mono"'; c.textAlign = 'center';
+  c.fillText(`New message · draft ${S.level + 1} of ${LEVELS.length}`, W / 2, 70);
+
+  c.textAlign = 'left';
+  const field = (label, value, y) => {
+    c.font = '500 30px "IBM Plex Mono"'; c.fillStyle = '#8a8577'; c.fillText(label, 92, y);
+    c.fillStyle = '#22252b'; c.fillText(value, 270, y);
+    c.fillStyle = '#e1dccf'; c.fillRect(92, y + 28, 1096, 2);
+  };
+  field('To', lv.to, 150);
+  field('Subject', lv.subject, 222);
+
+  // body: ghost of the target text, typed letters over it
+  const tg = target(), t = S.typed, n = Math.max(tg.length, t.length);
+  let fs = 104; c.font = `700 ${fs}px "IBM Plex Mono"`;
+  let cw = c.measureText('M').width;
+  if (cw * (n + 1) > 1080) { fs = Math.floor(fs * 1080 / (cw * (n + 1))); c.font = `700 ${fs}px "IBM Plex Mono"`; cw = c.measureText('M').width; }
+  const bx = 96, by = 380;
+  for (let i = 0; i < tg.length; i++) { c.fillStyle = '#ddd7c9'; c.fillText(tg[i] === ' ' ? '·' : tg[i], bx + i * cw, by); }
+  for (let i = 0; i < t.length; i++) {
+    const ok = t[i] === tg[i], x = bx + i * cw;
+    if (!ok) { c.fillStyle = '#f8d3c8'; c.fillRect(x - 2, by - fs * 0.62, cw + 4, fs * 1.05); }
+    c.fillStyle = ok ? '#1d2027' : '#d23b2a';
+    c.fillText(t[i] === ' ' ? (ok ? ' ' : '·') : t[i], x, by);
+  }
+  if ((time * 2.2 | 0) % 2 === 0) { c.fillStyle = '#e8603c'; c.fillRect(bx + t.length * cw, by - fs * 0.55, 7, fs * 0.95); }
+
+  c.font = '500 30px "IBM Plex Sans Condensed"'; c.fillStyle = '#8a8577';
+  c.fillText(lv.tip, 96, 500);
+
+  // footer: send button + modifier chips
+  const ready = t === tg;
+  rrPath(c, 92, 566, 250, 76, 14);
+  c.fillStyle = ready ? ((time * 3 | 0) % 2 ? '#f2b134' : '#f7c65a') : '#e6e1d5'; c.fill();
+  c.fillStyle = ready ? '#2a2214' : '#aaa496'; c.font = '700 34px "IBM Plex Mono"'; c.textAlign = 'center';
+  c.fillText('Send ↵', 217, 606);
+  const chip = (label, on, x) => {
+    rrPath(c, x, 580, 150, 48, 24); c.fillStyle = on ? '#5bbf6a' : '#e6e1d5'; c.fill();
+    c.fillStyle = on ? '#0f2414' : '#aaa496'; c.font = '700 24px "IBM Plex Mono"'; c.fillText(label, x + 75, 606);
+  };
+  chip('CAPS', S.caps, 860); chip('SHIFT', shiftHeld(), 1030);
+  c.fillStyle = '#8a8577'; c.font = '600 28px "IBM Plex Mono"'; c.fillText(`${t.length}/${tg.length}`, 720, 606);
+
+  if (S.flashT > 0 && S.flash) {
+    c.globalAlpha = clamp(S.flashT / 0.4, 0, 1);
+    c.font = '600 30px "IBM Plex Sans Condensed"';
+    const w = c.measureText(S.flash).width + 60;
+    rrPath(c, W / 2 - w / 2, 430, w, 54, 27); c.fillStyle = '#22252b'; c.fill();
+    c.fillStyle = '#f1ede4'; c.fillText(S.flash, W / 2, 458);
+    c.globalAlpha = 1;
+  }
+  c.restore();
+
+  if (S.sentT >= 0) {
+    c.globalAlpha = clamp((S.sentT - 0.5) / 0.3, 0, 1);
+    c.fillStyle = '#f1ede4'; c.font = '700 110px "IBM Plex Mono"'; c.textAlign = 'center';
+    c.fillText('Sent ✓', W / 2, 330);
+    c.font = '500 38px "IBM Plex Sans Condensed"'; c.fillStyle = '#a9b8cc';
+    c.fillText(S.level + 1 < LEVELS.length ? 'Opening the next draft…' : 'That was the last one.', W / 2, 420);
+    c.globalAlpha = 1;
+  }
+  screenTex.needsUpdate = true;
+}
+
+/* ---------- per-frame updates ---------- */
+const lerpAngle = (a, b, t) => { let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI; if (d < -Math.PI) d += Math.PI * 2; return a + d * t; };
+
+function updatePlayer(m, dt, time) {
+  if (!m.active) { m.group.visible = m.blob.visible = false; return; }
+  m.group.visible = m.blob.visible = true;
+  const inp = input(m);
+  const acc = m.grounded ? 14 : 7;
+  m.vx += (inp.x * SPEED - m.vx) * Math.min(1, dt * acc);
+  m.vz += (inp.z * SPEED - m.vz) * Math.min(1, dt * acc);
+  m.jumpBuf -= dt;
+  m.coyote = m.grounded ? 0.1 : m.coyote - dt;
+  m.airTime = m.grounded ? 0 : m.airTime + dt;
+  if (m.jumpBuf > 0 && m.coyote > 0) {
+    m.vy = JUMP_V; m.grounded = false; m.coyote = 0; m.jumpBuf = 0; m.jumpCut = false; m.squash = 1.28; m.squashV = 0; sfxSqueak();
+  }
+  if (!m.grounded && m.vy > 0 && !inp.jumpHeld && !m.jumpCut) { m.vy *= 0.5; m.jumpCut = true; }
+
+  const ox = m.x, oz = m.z;
+  if (m.grounded && m.groundMouse) { m.x += m.groundMouse.dx; m.z += m.groundMouse.dz; }
+  const nx = clamp(m.x + m.vx * dt, BOUNDS.x0, BOUNDS.x1);
+  if (groundAt(nx, m.z, R, m).h > m.y + STEP) m.vx = 0; else m.x = nx;
+  const nz = clamp(m.z + m.vz * dt, BOUNDS.z0, BOUNDS.z1);
+  if (groundAt(m.x, nz, R, m).h > m.y + STEP) m.vz = 0; else m.z = nz;
+  m.dx = m.x - ox; m.dz = m.z - oz;
+
+  m.vy = Math.max(m.vy - GRAV * dt, -30);
+  m.y += m.vy * dt;
+  const g = groundAt(m.x, m.z, R, m);
+  if (m.y <= g.h) {
+    if (!m.grounded) land(m, -m.vy, g);
+    m.y = g.h; m.vy = 0; m.grounded = true;
+  } else if (m.grounded && m.vy <= 0 && m.y - g.h < SNAP) {
+    m.y = g.h; m.vy = 0;
+  } else m.grounded = false;
+  m.groundKey = m.grounded ? g.key : null;
+  m.groundMouse = m.grounded ? g.mouse : null;
+  if (m.y < -3) placeAtSpawn(m);
+
+  // look & animation
+  const sp = Math.hypot(m.vx, m.vz);
+  if (sp > 0.4) m.face = lerpAngle(m.face, Math.atan2(m.vx, m.vz), Math.min(1, dt * 14));
+  m.squashV += ((1 - m.squash) * 260 - m.squashV * 16) * dt;
+  m.squash += m.squashV * dt;
+  const s = m.squash * (m.grounded ? 1 : 1 + clamp(m.vy * 0.012, -0.1, 0.12));
+  m.body.scale.set(1 / Math.sqrt(s), s, 1 / Math.sqrt(s));
+  if (m.grounded) m.phase += sp * dt * 9;
+  const walk = m.grounded ? Math.min(1, sp / SPEED) : 0;
+  m.body.position.y = Math.abs(Math.sin(m.phase)) * 0.035 * walk;
+  m.feet.forEach((f, i) => { f.position.y = 0.025 + Math.max(0, Math.sin(m.phase + (i === 0 || i === 3 ? 0 : Math.PI))) * 0.06 * walk; });
+  m.tail.rotation.y = Math.sin(time * 4 + m.id * 2) * 0.35 + Math.sin(m.phase) * 0.2 * walk;
+  m.tail.rotation.x = m.grounded ? 0 : clamp(-m.vy * 0.03, -0.4, 0.4);
+  m.group.position.set(m.x, m.y, m.z);
+  m.group.rotation.y = m.face;
+
+  const gb = groundAt(m.x, m.z, 0.02, m), hgt = m.y - gb.h;
+  m.blob.position.set(m.x, gb.h + 0.015, m.z);
+  m.blob.scale.setScalar(clamp(1 - hgt * 0.22, 0.45, 1));
+  m.blob.material.opacity = clamp(1 - hgt * 0.15, 0.4, 1);
+  m.preview = !m.grounded && m.vy < 2 ? gb.key : null;
+}
+function land(m, fallSpeed, g) {
+  m.squash = clamp(1 - Math.max(0, fallSpeed) * 0.035, 0.62, 0.95); m.squashV = 0;
+  if (g.key && m.airTime > 0.12) pressKey(g.key);
+  else if (g.mouse) sfxSqueak();
+  else if (fallSpeed > 4) sfxThud();
+}
+
+const BLACK = new THREE.Color(0), ACCENT = new THREE.Color('#f2b134'), tmpC = new THREE.Color();
+function updateKeys(dt, time) {
+  // a latched Shift releases when no mouse is standing on it
+  for (const k of [keyById.ShiftL, keyById.ShiftR]) {
+    if (k.held && !players.some(m => m.active && m.grounded && m.groundKey === k)) { k.held = false; sfxClick(false, true); }
+  }
+  const hints = new Set(hintKeys());
+  const pulse = 0.18 + 0.14 * Math.sin(time * 5);
+  for (const k of keys) {
+    k.down -= dt;
+    const tgt = (k.down > 0 || k.held) ? TRAVEL : 0;
+    k.depth += (tgt - k.depth) * Math.min(1, dt * (tgt > k.depth ? 45 : 16));
+    k.raise += (k.raiseT - k.raise) * Math.min(1, dt * 3.5);
+    const by = CAP_BOTTOM + k.raise - k.depth;
+    k.group.position.y = by;
+    const sh = Math.max(0.01, by - PLATE - 0.1);
+    k.stem.scale.y = sh; k.stem.position.y = PLATE + 0.1 + sh / 2;
+    tmpC.copy(BLACK);
+    if (hints.has(k)) tmpC.copy(ACCENT).multiplyScalar(pulse);
+    for (const m of players) if (m.active && m.preview === k) tmpC.copy(m.color).multiplyScalar(0.45);
+    k.mat.emissive.copy(tmpC);
+  }
+  capsLed.material.emissive.set(S.caps ? '#5bff7a' : '#000000');
+}
+
+/* ---------- loop ---------- */
+const clock = new THREE.Clock();
+let simTime = 0;
+function frame() {
+  step(Math.min(clock.getDelta(), 1 / 30));
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+function step(dt) {
+  simTime += dt; const time = simTime;
+  for (const m of players) updatePlayer(m, dt, time);
+  updateKeys(dt, time);
+  for (const p of props) {
+    if (p.drop > 0) { p.drop = Math.max(0, p.drop - dt * 14); }
+    p.group.position.y = p.drop;
+  }
+  for (let i = pops.length - 1; i >= 0; i--) {
+    const p = pops[i]; p.t += dt;
+    p.sp.position.y += dt * 1.8; p.sp.material.opacity = clamp(1.2 - p.t / 0.8, 0, 1);
+    if (p.t > 0.95) { scene.remove(p.sp); p.sp.material.dispose(); pops.splice(i, 1); }
+  }
+  S.flashT -= dt; S.shake = Math.max(0, S.shake - dt);
+  if (S.sentT >= 0) {
+    S.sentT += dt;
+    if (S.sentT > 2.3) {
+      if (S.level + 1 < LEVELS.length) loadLevel(S.level + 1);
+      else { S.sentT = -1; S.done = true; for (const k of keys) k.raiseT = 0; clearProps(); updateHud(); }
+    }
+  }
+  screenTimer -= dt;
+  if (screenTimer <= 0) { drawScreen(time); screenTimer = 1 / 30; }
+}
+
+/* ---------- HUD buttons ---------- */
+const blurAfter = fn => e => { fn(); e.currentTarget.blur(); };
+document.getElementById('bReset').addEventListener('click', blurAfter(() => loadLevel(S.level)));
+document.getElementById('bSkip').addEventListener('click', blurAfter(() => loadLevel((S.level + 1) % LEVELS.length)));
+document.getElementById('bMute').addEventListener('click', blurAfter(() => { audio(); toggleMute(); }));
+
+/* ---------- boot (keeps progress across live updates) ---------- */
+window.claude?.hot?.snapshot?.(() => ({ level: S.level, typed: S.typed, caps: S.caps }));
+function start(data = {}) {
+  loadLevel(clamp(data.level | 0, 0, LEVELS.length - 1));
+  if (typeof data.typed === 'string') S.typed = data.typed;
+  if (data.caps) S.caps = true;
+  requestAnimationFrame(frame);
+}
+window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
+</script>
+</body>
+</html>
