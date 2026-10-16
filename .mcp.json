@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "olympus": {
+      "command": "/Applications/Intuition.app/Contents/Resources/app/resources/atlas/darwin-arm64/node",
+      "args": [
+        "/Applications/Intuition.app/Contents/Resources/app/resources/atlas/darwin-arm64/atlas-launcher.cjs",
+        "mcp",
+        "--dir",
+        "/Users/chloeongsiyi/keyboardmouse/2-blind-mice"
+      ]
+    }
+  }
+}

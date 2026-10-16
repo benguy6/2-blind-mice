@@ -117,18 +117,21 @@ const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#1b1712');
-scene.fog = new THREE.Fog('#1b1712', 45, 80);
+scene.fog = new THREE.Fog('#1b1712', 70, 140);
+// everything you play on (mat, keyboard, mice, props) lives in this scaled group; physics stays in key units
+const K = 1.75;
+const play = new THREE.Group(); play.scale.setScalar(K); scene.add(play);
 
 const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 200);
 const ELEV = THREE.MathUtils.degToRad(70);         // camera pitched 70° down from horizontal
-const camTarget = new THREE.Vector3(0, 2.2, -5.6);
+const camTarget = new THREE.Vector3(0, 3, -7.2);
 
 function fit() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h);
   camera.aspect = w / h;
   const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
-  const needH = 10.7, needW = camera.aspect < 1 ? 8.8 : 11.4;
+  const needH = 15.5, needW = camera.aspect < 1 ? 14.5 : 16.5;
   const D = Math.max(needH / tv, needW / (tv * camera.aspect));
   camera.position.set(0, camTarget.y + Math.sin(ELEV) * D, camTarget.z + Math.cos(ELEV) * D);
   camera.lookAt(camTarget);
@@ -144,12 +147,12 @@ sun.position.set(-9, 20, 9);
 sun.target.position.set(0, 0, -1);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 12, bottom: -12, near: 1, far: 50 });
+Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 24, bottom: -24, near: 1, far: 80 });
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.02;
 scene.add(sun, sun.target);
 const screenGlow = new THREE.PointLight('#a9c6ff', 40, 22, 2);
-screenGlow.position.set(0, 5, -4.5);
+screenGlow.position.set(0, 5, -6);
 scene.add(screenGlow);
 
 /* ---------- helpers ---------- */
@@ -210,39 +213,39 @@ const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, rough
   // remap ShapeGeometry UVs (which are in world units) to 0..1
   const uv = mat.geometry.attributes.uv, pos = mat.geometry.attributes.position;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + 14) / 28, (pos.getY(i) + 6.1) / 12.2);
-  mat.rotation.x = -Math.PI / 2; mat.position.set(0, 0.012, 0.6); mat.receiveShadow = true; scene.add(mat);
+  mat.rotation.x = -Math.PI / 2; mat.position.set(0, 0.007, 0.6); mat.receiveShadow = true; play.add(mat);
 }
 
 /* ---------- keyboard case ---------- */
 {
   const caseMat = std('#1f2a3a', { roughness: 0.45, metalness: 0.15 });
   const base = new THREE.Mesh(slab(CASE.x1 - CASE.x0, CASE.z1 - CASE.z0, PLATE, 0.45), caseMat);
-  base.castShadow = base.receiveShadow = true; scene.add(base);
+  base.castShadow = base.receiveShadow = true; play.add(base);
 
   const outer = rrShape(CASE.x1 - CASE.x0 - 0.08, CASE.z1 - CASE.z0 - 0.08, 0.42);
   const hole = rrShape(WELL.x1 - WELL.x0 + 0.08, WELL.z1 - WELL.z0 + 0.08, 0.12);
   outer.holes.push(hole);
   const rimGeo = new THREE.ExtrudeGeometry(outer, { depth: CASE_TOP - PLATE - 0.08, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.04, bevelSegments: 3, curveSegments: 8 });
   rimGeo.rotateX(-Math.PI / 2); rimGeo.translate(0, PLATE + 0.04, 0);
-  const rim = new THREE.Mesh(rimGeo, caseMat); rim.castShadow = rim.receiveShadow = true; scene.add(rim);
+  const rim = new THREE.Mesh(rimGeo, caseMat); rim.castShadow = rim.receiveShadow = true; play.add(rim);
 
   const plate = new THREE.Mesh(new THREE.BoxGeometry(WELL.x1 - WELL.x0, 0.02, WELL.z1 - WELL.z0), std('#121519', { roughness: 0.4, metalness: 0.4 }));
-  plate.position.y = PLATE; plate.receiveShadow = true; scene.add(plate);
+  plate.position.y = PLATE; plate.receiveShadow = true; play.add(plate);
 
   // badge on the front rim
   const bv = canvas(640, 80), b = bv.getContext('2d');
   b.fillStyle = '#f2b134'; b.font = '700 44px "IBM Plex Mono"'; b.textBaseline = 'middle';
   b.fillText('MOUSETRAP·60', 8, 42);
   const badge = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.325), new THREE.MeshBasicMaterial({ map: tex(bv), transparent: true }));
-  badge.rotation.x = -Math.PI / 2; badge.position.set(5.9, CASE_TOP + 0.005, 2.81); scene.add(badge);
+  badge.rotation.x = -Math.PI / 2; badge.position.set(5.9, CASE_TOP + 0.005, 2.81); play.add(badge);
 
   // USB cable running back to the monitor
   const curve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(-5.5, 0.55, -3.0), new THREE.Vector3(-5.6, 0.14, -3.7),
-    new THREE.Vector3(-4.2, 0.12, -5.0), new THREE.Vector3(-1.2, 0.12, -6.4), new THREE.Vector3(0, 0.12, -8.5),
+    new THREE.Vector3(-4.2, 0.07, -4.6), new THREE.Vector3(-1.2, 0.07, -5.4), new THREE.Vector3(0, 0.07, -6.5),
   ]);
   const cable = new THREE.Mesh(new THREE.TubeGeometry(curve, 60, 0.11, 10), std('#1a1d22', { roughness: 0.5 }));
-  cable.castShadow = true; scene.add(cable);
+  cable.castShadow = true; play.add(cable);
 }
 
 /* ---------- keys ---------- */
@@ -316,9 +319,9 @@ ROWS.forEach((row, ri) => {
       const lg = new THREE.Mesh(new THREE.PlaneGeometry(lw, ld), new THREE.MeshStandardMaterial({ map: lt, transparent: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }));
       lg.rotation.x = -Math.PI / 2; lg.position.y = CAP_H + 0.002; lg.receiveShadow = true; group.add(lg);
     }
-    scene.add(group);
-    const housing = new THREE.Mesh(housingGeo, housingMat); housing.position.set(x, PLATE + 0.07, z); scene.add(housing);
-    const stem = new THREE.Mesh(stemGeo, stemMat); stem.position.set(x, PLATE, z); stem.castShadow = true; scene.add(stem);
+    play.add(group);
+    const housing = new THREE.Mesh(housingGeo, housingMat); housing.position.set(x, PLATE + 0.07, z); play.add(housing);
+    const stem = new THREE.Mesh(stemGeo, stemMat); stem.position.set(x, PLATE, z); stem.castShadow = true; play.add(stem);
     const k = {
       def: d, x, z, hx: (d.w - GAP) / 2, hz: (1 - GAP) / 2, group, mat, stem,
       raise: 0, raiseT: 0, depth: 0, down: 0, held: false,
@@ -339,9 +342,10 @@ const capsLed = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.06), new THRE
 const SCR_W = 18, SCR_H = 10.125, BZ = 0.45, CHIN = 0.7;
 const screenCv = canvas(1280, 720), sctx = screenCv.getContext('2d');
 const screenTex = tex(screenCv);
+let monitor;
 {
   const mon = new THREE.Group();
-  mon.position.set(0, 1.5, -5.0);
+  mon.position.set(0, 1.5, -6.6);
   mon.rotation.x = -THREE.MathUtils.degToRad(66);   // tilted back so the screen faces the 70° camera
   const bw = SCR_W + 2 * BZ, bh = SCR_H + BZ + CHIN;
   const bezelGeo = new THREE.ExtrudeGeometry(rrShape(bw, bh, 0.5), { depth: 0.5, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 3 });
@@ -356,7 +360,7 @@ const screenTex = tex(screenCv);
   l.fillStyle = '#6b7280'; l.font = '600 34px "IBM Plex Sans Condensed"'; l.textAlign = 'center'; l.textBaseline = 'middle'; l.fillText('CHEDDAR', 128, 34);
   const logo = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.35), new THREE.MeshBasicMaterial({ map: tex(lv), transparent: true }));
   logo.position.set(0, CHIN / 2, 0.09); mon.add(logo);
-  scene.add(mon);
+  scene.add(mon); monitor = mon;
   mon.updateMatrixWorld(true);
   // stand: neck from desk foot to the back of the monitor
   const top = mon.localToWorld(new THREE.Vector3(0, bh * 0.5, -1.5));
@@ -379,15 +383,18 @@ const screenTex = tex(screenCv);
   const coffee = new THREE.Mesh(new THREE.CircleGeometry(1.22, 32), std('#2b1a10', { roughness: 0.15 })); coffee.rotation.x = -Math.PI / 2; coffee.position.y = 2.45;
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.16, 12, 24, Math.PI), std('#e8603c', { roughness: 0.4 }));
   handle.rotation.z = -Math.PI / 2; handle.position.set(1.3, 1.4, 0); handle.castShadow = true;
-  mug.add(body, bottom, coffee, handle); mug.position.set(-11.6, 0, -1.2); scene.add(mug);
+  mug.add(body, bottom, coffee, handle); mug.position.set(-17, 0, -9.5); scene.add(mug);
 
   const nv = canvas(512, 512), n = nv.getContext('2d');
   n.fillStyle = '#f7de6c'; n.fillRect(0, 0, 512, 512);
   n.fillStyle = 'rgba(0,0,0,.06)'; n.fillRect(0, 0, 512, 60);
   n.fillStyle = '#3a3320'; n.font = '600 54px "IBM Plex Sans Condensed"';
   ['TODO', '- buy cheese', '- email mom', '- quit job?'].forEach((t, i) => n.fillText(t, 36, 140 + i * 88));
-  const note = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4), std('#ffffff', { map: tex(nv), roughness: 0.9 }));
-  note.rotation.x = -Math.PI / 2; note.rotation.z = 0.12; note.position.set(11.2, 0.02, 0.6); note.receiveShadow = true; scene.add(note);
+  // stuck to the right edge of the monitor bezel, hanging off the side
+  const note = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4), std('#ffffff', { map: tex(nv), roughness: 0.9, side: THREE.DoubleSide }));
+  const bw = SCR_W + 2 * BZ, bh = SCR_H + BZ + CHIN;
+  note.position.set(bw / 2 + 1.25, bh - 2.6, 0.12); note.rotation.z = -0.08; note.castShadow = note.receiveShadow = true;
+  monitor.add(note);
 }
 
 /* ---------- level props (parkour platforms) ---------- */
@@ -419,11 +426,11 @@ function addRuler(x0, x1, z, top) {
     sleeve.position.set(ex, KEY_TOP + h * 0.72, z); sleeve.castShadow = true;
     g.add(pinkE, sleeve);
   }
-  scene.add(g);
+  play.add(g);
   props.push({ x0, x1, z0: z - 0.4, z1: z + 0.4, top, group: g, drop: reduceMotion ? 0 : 6 });
 }
 function clearProps() {
-  for (const p of props) { scene.remove(p.group); p.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+  for (const p of props) { play.remove(p.group); p.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
   props.length = 0;
 }
 
@@ -508,9 +515,9 @@ const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, d
 function makePlayer(id, fur, scarf, color, spawn) {
   const m = buildMouse(fur, scarf);
   m.group.scale.setScalar(MOUSE_SCALE);
-  scene.add(m.group);
+  play.add(m.group);
   const blob = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), blobMat.clone());
-  blob.rotation.x = -Math.PI / 2; scene.add(blob);
+  blob.rotation.x = -Math.PI / 2; play.add(blob);
   return {
     id, ...m, blob, color: new THREE.Color(color), spawn,
     x: spawn.x, y: 0, z: spawn.z, vx: 0, vy: 0, vz: 0, dx: 0, dz: 0,
@@ -737,7 +744,7 @@ function popTex(ch) {
 function pop(k, ch) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: popTex(ch), transparent: true, depthWrite: false, depthTest: false }));
   sp.position.set(k.x, k.top() + 0.6, k.z); sp.scale.set(1.25, 1, 1); sp.renderOrder = 10;
-  scene.add(sp); pops.push({ sp, t: 0 });
+  play.add(sp); pops.push({ sp, t: 0 });
 }
 
 /* ---------- monitor screen (email client) ---------- */
@@ -941,7 +948,7 @@ function step(dt) {
   for (let i = pops.length - 1; i >= 0; i--) {
     const p = pops[i]; p.t += dt;
     p.sp.position.y += dt * 1.8; p.sp.material.opacity = clamp(1.2 - p.t / 0.8, 0, 1);
-    if (p.t > 0.95) { scene.remove(p.sp); p.sp.material.dispose(); pops.splice(i, 1); }
+    if (p.t > 0.95) { play.remove(p.sp); p.sp.material.dispose(); pops.splice(i, 1); }
   }
   S.flashT -= dt; S.shake = Math.max(0, S.shake - dt);
   if (S.sentT >= 0) {
